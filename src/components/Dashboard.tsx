@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -15,7 +16,9 @@ import {
   Filter,
   User,
   Phone,
-  Calendar
+  Calendar,
+  LogOut,
+  Home
 } from 'lucide-react';
 
 interface Issue {
@@ -130,8 +133,26 @@ const Dashboard = () => {
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
       <div className="border-b bg-card/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-foreground">Authority Dashboard</h1>
-          <p className="text-muted-foreground">Monitor and manage sanitation issues</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Authority Dashboard</h1>
+              <p className="text-muted-foreground">Monitor and manage sanitation issues</p>
+            </div>
+            <div className="flex gap-2">
+              <Link to="/">
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <Home className="h-4 w-4" />
+                  Back to Home
+                </Button>
+              </Link>
+              <Link to="/authority">
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <LogOut className="h-4 w-4" />
+                  Logout
+                </Button>
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
 
