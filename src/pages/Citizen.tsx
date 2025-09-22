@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { MapPin, Camera, Upload, MapIcon as Map, Navigation } from 'lucide-react';
+import { MapPin, Camera, Upload, MapIcon as Map, Navigation, ArrowLeft } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const Citizen = () => {
@@ -95,9 +96,17 @@ const Citizen = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted p-4">
       <div className="max-w-2xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-foreground mb-2">Report an Issue</h1>
-          <p className="text-muted-foreground">Help keep your community clean and safe</p>
+        <div className="flex items-center justify-between mb-8">
+          <div className="text-center flex-1">
+            <h1 className="text-3xl font-bold text-foreground mb-2">Report an Issue</h1>
+            <p className="text-muted-foreground">Help keep your community clean and safe</p>
+          </div>
+          <Link to="/">
+            <Button variant="outline" size="sm" className="flex items-center gap-2">
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+          </Link>
         </div>
 
         <Card className="bg-gradient-card shadow-xl border-0">
