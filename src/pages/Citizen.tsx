@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { MapPin, Camera, Upload, MapIcon as Map, Navigation, ArrowLeft } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { saveIssue, detectProblemFromImage } from '@/lib/issueStorage';
 
 const Citizen = () => {
   const [formData, setFormData] = useState({
@@ -18,12 +19,34 @@ const Citizen = () => {
   });
   const [locationMethod, setLocationMethod] = useState<'manual' | 'gps'>('manual');
   const [loading, setLoading] = useState(false);
+  const [aiDetecting, setAiDetecting] = useState(false);
+  const [aiDetectedProblem, setAiDetectedProblem] = useState<string>('');
   const { toast } = useToast();
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setFormData(prev => ({ ...prev, image: file }));
+      
+      // AI detection simulation
+      setAiDetecting(true);
+      try {
+        const detectedProblem = await detectProblemFromImage(file);
+        setAiDetectedProblem(detectedProblem);
+        toast({
+          title: "AI Analysis Complete",
+          description: `Detected: ${detectedProblem}`,
+        });
+      } catch (error) {
+        console.error('AI detection failed:', error);
+        toast({
+          title: "AI Analysis Failed",
+          description: "Could not analyze the image automatically.",
+          variant: "destructive",
+        });
+      } finally {
+        setAiDetecting(false);
+      }
     }
   };
 
@@ -76,13 +99,23 @@ const Citizen = () => {
 
     setLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      // Save the issue
+      const savedIssue = saveIssue({
+        title: aiDetectedProblem || 'Sanitation Issue',
+        description: formData.description || aiDetectedProblem || 'Issue reported by citizen',
+        location: formData.location,
+        reportedBy: formData.name,
+        phone: formData.phone,
+        aiDetectedProblem: aiDetectedProblem || undefined,
+      });
+
       toast({
         title: "Report submitted successfully",
-        description: "Thank you for reporting this issue. Authorities have been notified.",
+        description: `Issue #${savedIssue.id} has been created. Authorities have been notified.`,
       });
+
+      // Reset form
       setFormData({
         name: '',
         phone: '',
@@ -90,7 +123,22 @@ const Citizen = () => {
         description: '',
         image: null
       });
-    }, 2000);
+      setAiDetectedProblem('');
+      
+      // Reset file input
+      const fileInput = document.getElementById('image') as HTMLInputElement;
+      if (fileInput) fileInput.value = '';
+      
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      toast({
+        title: "Submission failed",
+        description: "There was an error submitting your report. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -205,16 +253,29 @@ const Citizen = () => {
                     accept="image/*"
                     onChange={handleImageUpload}
                     className="hidden"
+                    disabled={aiDetecting}
                   />
                   <Label htmlFor="image" className="cursor-pointer">
                     <div className="flex flex-col items-center gap-2">
-                      <Upload className="h-8 w-8 text-muted-foreground" />
+                      <Upload className={`h-8 w-8 ${aiDetecting ? 'animate-pulse text-primary' : 'text-muted-foreground'}`} />
                       <span className="text-sm text-muted-foreground">
-                        {formData.image ? formData.image.name : 'Click to upload a photo of the issue'}
+                        {aiDetecting 
+                          ? 'AI analyzing image...'
+                          : formData.image 
+                            ? `${formData.image.name} - ${aiDetectedProblem ? `AI detected: ${aiDetectedProblem}` : 'Ready to submit'}`
+                            : 'Click to upload a photo of the issue'
+                        }
                       </span>
                     </div>
                   </Label>
                 </div>
+                {aiDetectedProblem && (
+                  <div className="mt-2 p-3 bg-info/10 border border-info/20 rounded-lg">
+                    <p className="text-sm text-info-foreground">
+                      <strong>AI Detection:</strong> {aiDetectedProblem}
+                    </p>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

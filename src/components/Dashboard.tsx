@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { getIssues, updateIssue, Issue } from '@/lib/issueStorage';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,62 +22,26 @@ import {
   Home
 } from 'lucide-react';
 
-interface Issue {
-  id: string;
-  title: string;
-  description: string;
-  location: string;
-  status: 'pending' | 'in-progress' | 'resolved';
-  priority: 'low' | 'medium' | 'high';
-  reportedBy: string;
-  phone: string;
-  reportedAt: string;
-  assignedTo?: string;
-  imageUrl?: string;
-}
-
-const mockIssues: Issue[] = [
-  {
-    id: '1',
-    title: 'Garbage Overflow',
-    description: 'Overflowing waste bin on Main Street causing hygiene issues',
-    location: 'Main Street, Block A',
-    status: 'pending',
-    priority: 'high',
-    reportedBy: 'John Doe',
-    phone: '+1234567890',
-    reportedAt: '2024-01-15T10:30:00Z',
-  },
-  {
-    id: '2',
-    title: 'Blocked Drain',
-    description: 'Storm drain blocked causing water stagnation',
-    location: 'Park Avenue, Sector 5',
-    status: 'in-progress',
-    priority: 'medium',
-    reportedBy: 'Jane Smith',
-    phone: '+1234567891',
-    reportedAt: '2024-01-14T14:20:00Z',
-    assignedTo: 'Team Alpha',
-  },
-  {
-    id: '3',
-    title: 'Broken Public Toilet',
-    description: 'Public toilet facility out of order',
-    location: 'Central Park',
-    status: 'resolved',
-    priority: 'medium',
-    reportedBy: 'Mike Johnson',
-    phone: '+1234567892',
-    reportedAt: '2024-01-13T09:15:00Z',
-    assignedTo: 'Team Beta',
-  },
-];
-
 const Dashboard = () => {
-  const [issues, setIssues] = useState<Issue[]>(mockIssues);
+  const [issues, setIssues] = useState<Issue[]>([]);
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedPriority, setSelectedPriority] = useState<string>('all');
+
+  // Load issues from localStorage on component mount
+  useEffect(() => {
+    const loadedIssues = getIssues();
+    setIssues(loadedIssues);
+  }, []);
+
+  // Refresh issues periodically to catch new reports
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const loadedIssues = getIssues();
+      setIssues(loadedIssues);
+    }, 5000); // Refresh every 5 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   const filteredIssues = issues.filter(issue => {
     const statusMatch = selectedStatus === 'all' || issue.status === selectedStatus;
@@ -85,15 +50,15 @@ const Dashboard = () => {
   });
 
   const updateIssueStatus = (id: string, newStatus: 'pending' | 'in-progress' | 'resolved') => {
-    setIssues(prev => prev.map(issue => 
-      issue.id === id ? { ...issue, status: newStatus } : issue
-    ));
+    updateIssue(id, { status: newStatus });
+    const updatedIssues = getIssues();
+    setIssues(updatedIssues);
   };
 
   const assignIssue = (id: string, team: string) => {
-    setIssues(prev => prev.map(issue => 
-      issue.id === id ? { ...issue, assignedTo: team } : issue
-    ));
+    updateIssue(id, { assignedTo: team });
+    const updatedIssues = getIssues();
+    setIssues(updatedIssues);
   };
 
   const getStatusBadge = (status: string) => {
@@ -269,74 +234,94 @@ const Dashboard = () => {
           </TabsList>
 
           <TabsContent value="list" className="space-y-4">
-            {filteredIssues.map((issue) => (
-              <Card key={issue.id} className="bg-gradient-card border-0 shadow-md">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <CardTitle className="text-lg">{issue.title}</CardTitle>
-                      <CardDescription className="mt-1">{issue.description}</CardDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      {getStatusBadge(issue.status)}
-                      {getPriorityBadge(issue.priority)}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="h-4 w-4 text-muted-foreground" />
-                        <span>{issue.location}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-muted-foreground" />
-                        <span>{issue.reportedBy}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Phone className="h-4 w-4 text-muted-foreground" />
-                        <span>{issue.phone}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-muted-foreground" />
-                        <span>{new Date(issue.reportedAt).toLocaleDateString()}</span>
-                      </div>
-                      {issue.assignedTo && (
-                        <div className="flex items-center gap-2">
-                          <Users className="h-4 w-4 text-muted-foreground" />
-                          <span>Assigned to: {issue.assignedTo}</span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex gap-2 pt-4 border-t">
-                      <Select onValueChange={(value) => updateIssueStatus(issue.id, value as any)}>
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue placeholder="Update Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="in-progress">In Progress</SelectItem>
-                          <SelectItem value="resolved">Resolved</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      
-                      <Select onValueChange={(value) => assignIssue(issue.id, value)}>
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue placeholder="Assign Team" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Team Alpha">Team Alpha</SelectItem>
-                          <SelectItem value="Team Beta">Team Beta</SelectItem>
-                          <SelectItem value="Team Gamma">Team Gamma</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+            {filteredIssues.length === 0 ? (
+              <Card className="bg-gradient-card border-0 shadow-md">
+                <CardContent className="p-8 text-center">
+                  <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-foreground mb-2">No Issues Found</h3>
+                  <p className="text-muted-foreground">
+                    {issues.length === 0 
+                      ? "No issues have been reported yet. Citizens can report issues using the reporting form."
+                      : "No issues match the current filters. Try adjusting your filter criteria."
+                    }
+                  </p>
                 </CardContent>
               </Card>
-            ))}
+            ) : (
+              filteredIssues.map((issue) => (
+                <Card key={issue.id} className="bg-gradient-card border-0 shadow-md">
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="text-lg">{issue.title}</CardTitle>
+                        <CardDescription className="mt-1">{issue.description}</CardDescription>
+                        {issue.aiDetectedProblem && (
+                          <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 bg-info/10 border border-info/20 rounded text-xs text-info-foreground">
+                            <span>🤖 AI: {issue.aiDetectedProblem}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        {getStatusBadge(issue.status)}
+                        {getPriorityBadge(issue.priority)}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4 text-muted-foreground" />
+                          <span>{issue.location}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span>{issue.reportedBy}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-muted-foreground" />
+                          <span>{issue.phone}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4 text-muted-foreground" />
+                          <span>{new Date(issue.reportedAt).toLocaleDateString()}</span>
+                        </div>
+                        {issue.assignedTo && (
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-muted-foreground" />
+                            <span>Assigned to: {issue.assignedTo}</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="flex gap-2 pt-4 border-t">
+                        <Select onValueChange={(value) => updateIssueStatus(issue.id, value as any)}>
+                          <SelectTrigger className="w-[140px]">
+                            <SelectValue placeholder="Update Status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="pending">Pending</SelectItem>
+                            <SelectItem value="in-progress">In Progress</SelectItem>
+                            <SelectItem value="resolved">Resolved</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        
+                        <Select onValueChange={(value) => assignIssue(issue.id, value)}>
+                          <SelectTrigger className="w-[140px]">
+                            <SelectValue placeholder="Assign Team" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Team Alpha">Team Alpha</SelectItem>
+                            <SelectItem value="Team Beta">Team Beta</SelectItem>
+                            <SelectItem value="Team Gamma">Team Gamma</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
           </TabsContent>
 
           <TabsContent value="map">
