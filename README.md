@@ -1,73 +1,86 @@
-# Welcome to your Lovable project
+# Urban Aid Report
 
-## Project info
+Urban Aid Report is a focused civic reporting platform for neighborhood waste and drainage problems. Citizens can submit and track garbage collection, illegal dumping, overflowing bins, blocked drains, and waterlogging reports. Authority staff have a protected operations desk for review, assignment, and status updates.
 
-**URL**: https://lovable.dev/projects/f784a622-c8a1-467b-91aa-3920dea9243b
+The website interface is available in English and Hindi. The language selector saves the user's choice in the browser and applies it across the public site, citizen dashboard, and authority desk.
 
-## How can I edit this code?
+## Technology
 
-There are several ways of editing your application.
+- Frontend: semantic HTML, CSS, and vanilla JavaScript
+- Backend: Node.js and Express
+- Data and images: local in-memory demo storage
+- Deployment target: Render
 
-**Use Lovable**
+## Run locally
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/f784a622-c8a1-467b-91aa-3920dea9243b) and start prompting.
+1. Install Node.js 18.18 or later.
+2. Run `npm install`.
+3. (Optional) Copy `.env.example` to `.env` to configure email notifications.
+4. Run `npm start` and visit `http://localhost:3000`.
 
-Changes made via Lovable will be committed automatically to this repo.
+For development with server restarts, run `npm run dev`.
 
-**Use your preferred IDE**
+## Environment variables
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `PORT` | No | HTTP port. Render provides this automatically. |
+| `NODE_ENV` | No | Set to `production` on Render. |
+| `ALLOWED_ORIGINS` | No | Comma-separated origins if the frontend is hosted separately. |
+| `FALSE_REPORT_POINT_DEDUCTION` | No | Points deducted for each authority-confirmed case 3–5; defaults to 25 and cannot reduce a wallet below zero. |
+| `SMTP_HOST` | No | SMTP server; defaults to Gmail's `smtp.gmail.com`. |
+| `SMTP_PORT` | No | SMTP TLS port; defaults to `465`. |
+| `SMTP_USER` | No | Authority sender mailbox; this project is preconfigured for `urbanaid88@gmail.com`. |
+| `SMTP_APP_PASSWORD` | No | Gmail App Password stored only in the server environment. Never use or commit the account login password. |
+| `EMAIL_FROM` | No | Sender label and mailbox shown to citizens. |
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## False-report review workflow
 
-Follow these steps:
+Only an authenticated authority can record a false-report finding. The authority must enter a specific reason and evidence summary and attest that the finding is intentional. A duplicate, honest mistake, or an issue that staff could not locate does not alone establish intentional false reporting. The account-level count is visible in the citizen report history and authority case view. Cases 1 and 2 generate a warning email. Cases 3, 4, and 5 deduct the configured points for each finding, up to the citizen's available balance. Case 6 and later block the account from submitting new reports. Sign-in and read access remain available so the citizen can review the record and appeal. Repeat sanctions require a stable authenticated account; unauthenticated or unverified-email reports do not accumulate the count. Authority report updates, false-report decisions, and appeal decisions send an automatic email to the citizen. If delivery fails or email is not configured, the authority action remains recorded; configure SMTP and retry warning emails from the authority view where available.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+For Gmail delivery, enable 2-Step Verification on the sender account, create an App Password in Google Account security settings, and set it as `SMTP_APP_PASSWORD` in the server's ignored `.env` file or deployment secret settings. Do not use the regular Gmail sign-in password. Email is sent directly through Gmail SMTP over TLS; the app password is never sent to the browser.
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+Citizens see the authority's finding in their own report history and can submit one appeal, including while reporting is blocked. The authority must record a review note when accepting or upholding it. Accepting an appeal restores deducted points and returns the report to review; accepted findings no longer count toward the account threshold, and the reporting restriction clears when five or fewer confirmed cases remain. The appeal and point transactions remain auditable in the case record and wallet history.
 
-# Step 3: Install the necessary dependencies.
-npm i
+The app currently runs in local demo mode and does not connect to Supabase. Reports, wallets, sanctions, and uploaded image previews are held in memory and reset when the server restarts; demo user accounts are stored in the ignored `.mock_users.json` file. Do not use this mode for production or real citizen data. Supabase migration files are retained in the repository but are not executed by the app.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+## API summary
 
-**Edit a file directly in GitHub**
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/api/health` | Local demo service health. |
+| `POST` | `/api/auth/signup` | Create a local demo citizen account. |
+| `POST` | `/api/auth/login` | Password login with server-side role verification. |
+| `GET` | `/api/auth/oauth/:provider` | Start Google, Facebook, or Apple OAuth. |
+| `GET` | `/api/auth/session` | Return the current signed-in user. |
+| `POST` | `/api/auth/logout` | Clear the current browser session. |
+| `POST` | `/api/reports` | Authenticated citizens submit a multipart report with optional `image`; blocked accounts cannot submit. |
+| `GET` | `/api/reports/mine` | Reports linked to the authenticated citizen account. |
+| `GET` | `/api/reports?reporter_email=` | Citizen report tracker. |
+| `GET` | `/api/reports/:id` | Public report detail without reporter contact data. |
+| `GET` | `/api/reports/admin/all` | Authority report list; requires an authenticated Authority session. |
+| `PATCH` | `/api/reports/:id` | Authority final category/severity, status, priority, assignment, and update; requires an authenticated Authority session. |
+| `POST` | `/api/reports/:id/false-report` | Authority records an evidence-backed decision; requires authority authentication and confirmation. |
+| `POST` | `/api/reports/:id/false-report-warning-email/retry` | Authority retries a failed or unconfigured case 1–2 warning email. |
+| `POST` | `/api/reports/:id/false-report-appeal` | Reporting citizen submits one appeal. |
+| `POST` | `/api/reports/:id/false-report-appeal/review` | Authority accepts or upholds a pending appeal with a review note. |
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Images are accepted only as genuine JPG, PNG, or WebP files up to 5 MB; the server checks both the declared type and file signature. Demo image previews are held in memory. Public tracking responses omit the reporter's name, email, and phone. Report-history list endpoints require the authenticated account and cannot be queried by another resident's email. New references use a 16-character random suffix; keep the reference private and share it only with people you trust.
 
-**Use GitHub Codespaces**
+## Deploy to Render
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Create a new **Web Service** from this repository (demo mode only; data will not persist across restarts):
 
-## What technologies are used for this project?
+- Build command: `npm install`
+- Start command: `npm start`
+- Add SMTP environment variables only if email notifications are needed.
 
-This project is built with:
+`render.yaml` contains the same service definition for Blueprint-based setup.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+The Express server serves the entire frontend and listens on `process.env.PORT`, so no `localhost` URL is embedded in the app.
 
-## How can I deploy this project?
+## Authentication and OAuth setup
 
-Simply open [Lovable](https://lovable.dev/projects/f784a622-c8a1-467b-91aa-3920dea9243b) and click on Share -> Publish.
+Citizen accounts can be created from the login screen with email/password. The local demo server creates HTTP-only session cookies. Demo mode includes `admin@city.gov` / `password123` as an authority test account; do not use demo credentials in production.
 
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Social login is unavailable in local demo mode. Public signup creates citizen accounts; use the seeded demo authority account for local UI review. Signed-in citizens see reports associated with their account automatically; reporter contact fields remain absent from public responses.

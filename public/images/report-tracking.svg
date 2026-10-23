@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 500" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Report tracking from submission to resolution</title>
+  <desc id="desc">A report status timeline on a phone with municipal review and resolution updates.</desc>
+  <defs>
+    <linearGradient id="panel" x1="94" y1="53" x2="545" y2="449" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E7F4EC"/>
+      <stop offset="1" stop-color="#EAF3F7"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="247" y1="80" x2="410" y2="419" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F8FBF9"/>
+    </linearGradient>
+    <filter id="softShadow" x="140" y="35" width="360" height="450" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="16" stdDeviation="14" flood-color="#244C3D" flood-opacity=".14"/>
+    </filter>
+  </defs>
+  <rect x="38" y="24" width="564" height="452" rx="44" fill="url(#panel)"/>
+  <circle cx="115" cy="113" r="45" fill="#D8EFE1"/>
+  <circle cx="531" cy="377" r="58" fill="#DAEDF0"/>
+  <path d="M66 402c65-56 117-58 173-6 44 41 94 41 143 1 70-56 129-50 192 2v49H66v-46Z" fill="#D6EADF"/>
+  <g filter="url(#softShadow)">
+    <rect x="218" y="48" width="204" height="398" rx="30" fill="#203A36"/>
+    <rect x="227" y="58" width="186" height="378" rx="24" fill="url(#screen)"/>
+    <rect x="289" y="68" width="72" height="7" rx="3.5" fill="#203A36"/>
+    <circle cx="274" cy="70" r="3.5" fill="#203A36"/>
+    <path d="M245 105h150" stroke="#E4ECE7" stroke-width="2"/>
+    <circle cx="257" cy="128" r="13" fill="#E3F2E8"/>
+    <path d="m252 128 4 4 7-8" stroke="#16735E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M280 123h83m-83 9h60" stroke="#B9C9C1" stroke-width="5" stroke-linecap="round"/>
+    <rect x="245" y="157" width="150" height="90" rx="14" fill="#F0F7F2"/>
+    <path d="M260 177h81m-81 12h110" stroke="#A8BBB1" stroke-width="6" stroke-linecap="round"/>
+    <rect x="260" y="207" width="48" height="20" rx="10" fill="#DCEFE3"/>
+    <path d="M271 217h26" stroke="#16735E" stroke-width="4" stroke-linecap="round"/>
+    <path d="M260 271v111" stroke="#C8DAD0" stroke-width="3" stroke-dasharray="5 7"/>
+    <circle cx="260" cy="274" r="10" fill="#16735E"/>
+    <path d="m256 274 3 3 5-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M283 270h82m-82 10h63" stroke="#A8BBB1" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="260" cy="326" r="10" fill="#16735E"/>
+    <path d="m256 326 3 3 5-6" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M283 322h92m-92 10h55" stroke="#A8BBB1" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="260" cy="378" r="10" fill="#F2B544"/>
+    <path d="M283 374h78m-78 10h63" stroke="#A8BBB1" stroke-width="5" stroke-linecap="round"/>
+  </g>
+  <g>
+    <rect x="66" y="190" width="166" height="84" rx="18" fill="white"/>
+    <circle cx="98" cy="232" r="18" fill="#E3F2E8"/>
+    <path d="M98 243s-10-9-10-15a10 10 0 1 1 20 0c0 6-10 15-10 15Z" fill="#16735E"/>
+    <circle cx="98" cy="228" r="3.5" fill="white"/>
+    <path d="M128 222h78m-78 12h57" stroke="#A8BBB1" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="208" cy="261" r="5" fill="#16735E"/>
+  </g>
+  <g>
+    <rect x="408" y="288" width="165" height="88" rx="18" fill="white"/>
+    <circle cx="443" cy="332" r="19" fill="#E3F2E8"/>
+    <path d="m435 332 6 6 11-13" stroke="#16735E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M472 323h77m-77 13h56" stroke="#A8BBB1" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="426" cy="363" r="5" fill="#F2B544"/>
+  </g>
+  <path d="M164 352c15-12 29-12 43 0m267-171c14-12 28-12 42 0" stroke="#83B79B" stroke-width="4" stroke-linecap="round"/>
+  <path d="M106 80c8-12 16-12 24 0m-12-12v24" stroke="#F2B544" stroke-width="4" stroke-linecap="round"/>
+</svg>

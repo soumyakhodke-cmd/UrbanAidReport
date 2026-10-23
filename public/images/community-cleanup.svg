@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 520" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Neighborhood garbage collection and drain maintenance</title>
+  <desc id="desc">A municipal cleanup crew collects waste beside a clear street drain in a green neighborhood.</desc>
+  <defs>
+    <linearGradient id="sky" x1="96" y1="32" x2="538" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EDF6EF"/>
+      <stop offset="1" stop-color="#F8FBF8"/>
+    </linearGradient>
+    <linearGradient id="truck" x1="292" y1="283" x2="531" y2="399" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#42A88D"/>
+      <stop offset="1" stop-color="#16775F"/>
+    </linearGradient>
+    <linearGradient id="road" x1="130" y1="374" x2="484" y2="493" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DDE9E0"/>
+      <stop offset="1" stop-color="#C7D8CC"/>
+    </linearGradient>
+    <filter id="shadow" x="82" y="62" width="478" height="428" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#315C48" flood-opacity=".14"/>
+    </filter>
+  </defs>
+  <rect x="44" y="32" width="552" height="430" rx="42" fill="url(#sky)"/>
+  <circle cx="505" cy="104" r="32" fill="#FFE6A8"/>
+  <path d="M73 293c57-68 119-89 186-59 58 26 112 22 161-14 57-42 111-39 160 8v173H73V293Z" fill="#DCEFE8"/>
+  <path d="M91 203h97v123H91z" fill="#F7FBF8"/>
+  <path d="M81 203l58-42 59 42H81Z" fill="#8AA9BE"/>
+  <path d="M111 228h21v26h-21zm39 0h21v26h-21zm-39 42h21v26h-21zm39 0h21v26h-21z" fill="#D1E8D7"/>
+  <path d="M211 180h87v146h-87z" fill="#FFFDF7"/>
+  <path d="M201 180l53-39 53 39H201Z" fill="#77A69B"/>
+  <path d="M229 204h18v24h-18zm35 0h18v24h-18zm-35 40h18v24h-18zm35 0h18v24h-18z" fill="#D1E8D7"/>
+  <path d="M130 326c0-24 18-43 40-43s40 19 40 43" fill="#4B9D75"/>
+  <path d="M139 327c0-17 13-31 29-31s29 14 29 31" fill="#72B786"/>
+  <path d="M175 322h8v36h-8z" fill="#8A674A"/>
+  <path d="M438 318c0-28 21-50 47-50s47 22 47 50" fill="#4B9D75"/>
+  <path d="M449 319c0-20 16-36 36-36s36 16 36 36" fill="#72B786"/>
+  <path d="M481 312h8v44h-8z" fill="#8A674A"/>
+  <path d="m78 353 485-1 33 74H54l24-73Z" fill="url(#road)"/>
+  <path d="M78 353 54 427h542l-33-75" stroke="#AABCCD" stroke-width="4"/>
+  <path d="M224 388h46" stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".75"/>
+  <path d="M320 388h46" stroke="#fff" stroke-width="8" stroke-linecap="round" opacity=".75"/>
+  <g filter="url(#shadow)">
+    <path d="M288 280a13 13 0 0 1 13-13h135a13 13 0 0 1 13 13v90H288v-90Z" fill="url(#truck)"/>
+    <path d="M449 306h53l38 40v24H449v-64Z" fill="#3A9A7D"/>
+    <path d="M466 317h29l23 25h-52v-25Z" fill="#C9ECF2"/>
+    <path d="M306 285h123v9H306z" fill="#A5E0C7" opacity=".9"/>
+    <path d="M313 309h74v9h-74zm0 20h105v9H313z" fill="#D2F1E2" opacity=".8"/>
+    <path d="M288 361h252v20H288z" fill="#145C4F"/>
+    <circle cx="345" cy="382" r="24" fill="#243746"/>
+    <circle cx="345" cy="382" r="11" fill="#DCE7DF"/>
+    <circle cx="491" cy="382" r="24" fill="#243746"/>
+    <circle cx="491" cy="382" r="11" fill="#DCE7DF"/>
+    <path d="M313 303h22v29h-22z" fill="#F4B941"/>
+    <path d="M316 308h16v6h-16z" fill="#FFF1C5"/>
+  </g>
+  <!-- Worker collecting a tied waste bag -->
+  <circle cx="230" cy="282" r="17" fill="#A86642"/>
+  <path d="M214 280c2-18 31-23 34-1l-5-3-4-9-17 3-8 10Z" fill="#253A4B"/>
+  <path d="M216 302h30l10 59h-50l10-59Z" fill="#F2B735"/>
+  <path d="m221 310 19 3 5 38h-29l5-41Z" fill="#F9D36F"/>
+  <path d="m216 315-24 31 8 6 29-27m20-7 18 20-8 7-20-17" stroke="#A86642" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m214 358-4 31m34-31 8 31" stroke="#34495A" stroke-width="10" stroke-linecap="round"/>
+  <path d="M197 388h18m31 0h18" stroke="#243746" stroke-width="8" stroke-linecap="round"/>
+  <path d="m174 344 18-5 22 30-10 19-31-7-6-18 7-19Z" fill="#68B98B"/>
+  <path d="m182 346 9-3 4 8-9 4z" fill="#D7F2E1"/>
+  <path d="M96 445h450" stroke="#B8C9BC" stroke-width="4" stroke-linecap="round"/>
+  <!-- Clear storm drain with flowing water -->
+  <rect x="82" y="427" width="126" height="31" rx="8" fill="#354B46"/>
+  <path d="M94 433v19m15-19v19m15-19v19m15-19v19m15-19v19m15-19v19m15-19v19m15-19v19" stroke="#C2D1C6" stroke-width="5" stroke-linecap="round"/>
+  <path d="M102 443h11m16 0h12m16 0h12m16 0h11" stroke="#69C5D6" stroke-width="3" stroke-linecap="round"/>
+  <!-- Report location marker -->
+  <path d="M122 118c0-23 18-41 41-41s41 18 41 41c0 29-41 66-41 66s-41-37-41-66Z" fill="#16735E"/>
+  <circle cx="163" cy="117" r="15" fill="white"/>
+  <path d="m157 117 4 4 9-10" stroke="#16735E" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M554 199c0-15 12-27 27-27s27 12 27 27c0 19-27 43-27 43s-27-24-27-43Z" fill="#F5AB28"/>
+  <circle cx="581" cy="198" r="10" fill="white"/>
+</svg>
