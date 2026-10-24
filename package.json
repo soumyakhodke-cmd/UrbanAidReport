@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node server/server.js",
     "dev": "node --watch server/server.js",
+    "email:verify": "node server/scripts/verify-email.js",
     "check": "node --check server/server.js && node --check public/js/app.js",
     "test": "node --test"
   },

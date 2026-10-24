@@ -1,6 +1,6 @@
-import { confirmFalseReport, createReport, getFalseReportCount, getReport, listReports, reviewFalseReportAppeal, submitFalseReportAppeal, updateFalseReportWarningEmail, updateReport } from "../services/reportService.js";
+import { confirmFalseReport, createReport, getFalseReportCount, getReport, listReports, reviewFalseReportAppeal, submitFalseReportAppeal, updateFalseReportActionEmail, updateFalseReportWarningEmail, updateReport } from "../services/reportService.js";
 import { accessToken } from "./authController.js";
-import { blockMockCitizenAccount, getUserFromAccessToken } from "../services/authService.js";
+import { getUserFromAccessToken } from "../services/authService.js";
 import { sendAuthorityReportAction, sendFalseReportWarning } from "../services/emailService.js";
 import { config } from "../config/env.js";
 import { requireSupabase } from "../config/supabase.js";
@@ -8,7 +8,15 @@ import { requireSupabase } from "../config/supabase.js";
 const categories = new Set(["GARBAGE", "DRAINAGE"]);
 const statuses = new Set(["SUBMITTED", "UNDER_REVIEW", "ASSIGNED", "IN_PROGRESS", "RESOLVED", "REJECTED"]);
 const priorities = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+const warningEmailAttempts = new Set();
 const clean = (value, max) => String(value || "").trim().slice(0, max);
+
+async function withWarningEmailLock(reportId, operation) {
+  if (warningEmailAttempts.has(reportId)) throw Object.assign(new Error("A warning email attempt is already in progress for this report."), { status: 409, code: "WARNING_EMAIL_IN_PROGRESS" });
+  warningEmailAttempts.add(reportId);
+  try { return await operation(); }
+  finally { warningEmailAttempts.delete(reportId); }
+}
 
 function validateReport(body) {
   const report = { title: clean(body.title, 120), category: clean(body.category, 40), description: clean(body.description, 2000), location: clean(body.location, 300), additionalInfo: clean(body.additionalInfo, 1000), reporterName: clean(body.reporterName, 100), reporterEmail: clean(body.reporterEmail, 254).toLowerCase(), reporterPhone: clean(body.reporterPhone, 30) };
@@ -76,6 +84,14 @@ export async function getMyReports(req, res) {
   return res.json({ reports, falseReportCount, summary });
 }
 
+export async function getMyFalseReportCount(req, res) {
+  const user = await getUserFromAccessToken(accessToken(req));
+  if (!user) return res.status(401).json({ error: "UNAUTHENTICATED", message: "Sign in to view your false-report count." });
+  if (user.app_metadata?.role === "authority") return res.status(403).json({ error: "FORBIDDEN", message: "Authority accounts do not have a citizen false-report count." });
+  const falseReportCount = await getFalseReportCount({ userId: user.id, email: user.email });
+  return res.json({ falseReportCount });
+}
+
 export async function getOneReport(req, res) {
   const user = await getUserFromAccessToken(accessToken(req));
   const isAuthority = user?.app_metadata?.role === "authority";
@@ -89,6 +105,21 @@ export async function patchReport(req, res) {
   if (req.body.category && !changes.category) return res.status(422).json({ error: "INVALID_CATEGORY", message: "Choose Garbage or Drainage as the final category." });
   if (req.body.severity && !changes.severity) return res.status(422).json({ error: "INVALID_SEVERITY", message: "Choose a valid final severity." });
   const authorityName = clean(req.user?.user_metadata?.full_name || req.user?.email, 100) || "Municipal Authority";
+  if (changes.status === "REJECTED") {
+    const current = await getReport(req.params.id, true, true);
+    const currentCase = current.false_report_case || current.false_report_cases?.[0];
+    if (currentCase && current.status !== "REJECTED") return res.status(409).json({ error: "FALSE_REPORT_ALREADY_DECIDED", message: "This report already has a false-report decision. An appeal can reverse that decision; it cannot be counted again." });
+    if (!currentCase) {
+      const evidence = req.body.falseReportDecision;
+      if (!evidence || evidence.confirmedByAuthority !== true) return res.status(422).json({ error: "FALSE_REPORT_CONFIRMATION_REQUIRED", message: "Rejection requires the authority's evidence-backed false-report confirmation." });
+      const otherChanges = { ...changes, status: undefined };
+      const hasReportFields = ["category", "priority", "severity", "assigned_to"].some((key) => otherChanges[key] !== undefined);
+      if (hasReportFields) await updateReport(req.params.id, otherChanges, authorityName);
+      else if (otherChanges.message) await updateReport(req.params.id, { status: current.status, message: otherChanges.message }, authorityName);
+      const result = await recordFalseReportDecision(req, req.params.id, evidence);
+      return res.json({ report: result.report, decision: result.decision, reward: null, notification: { status: result.decision.warning_email_status || result.decision.action_email_status || "NOT_APPLICABLE" } });
+    }
+  }
   const result = await updateReport(req.params.id, changes, authorityName);
   const details = [];
   if (changes.message) details.push(changes.message);
@@ -100,21 +131,21 @@ export async function patchReport(req, res) {
   return res.json({ report: result, reward: result.reward_result || null, notification: { status: emailResult.status } });
 }
 
-export async function markFalseReport(req, res) {
-  if (req.body.confirmedByAuthority !== true) return res.status(422).json({ error: "AUTHORITY_CONFIRMATION_REQUIRED", message: "Confirm that you reviewed evidence of intentional false reporting." });
+async function recordFalseReportDecision(req, reportId, payload) {
+  if (payload.confirmedByAuthority !== true) throw Object.assign(new Error("Confirm that you reviewed evidence of intentional false reporting."), { status: 422, code: "AUTHORITY_CONFIRMATION_REQUIRED" });
   const result = await confirmFalseReport({
-    reportId: req.params.id,
-    reason: clean(req.body.reason, 500),
-    evidenceSummary: clean(req.body.evidenceSummary, 1000),
+    reportId,
+    reason: clean(payload.reason, 500),
+    evidenceSummary: clean(payload.evidenceSummary, 1000),
     authorityUser: req.user,
     authorityName: clean(req.user?.user_metadata?.full_name || req.user?.email, 100) || "Municipal Authority",
   });
   const decision = result.decision;
   if (decision.action === "WARNING") {
     const emailResult = decision.citizen_user_id
-      ? await sendFalseReportWarning({ to: decision.reporter_email, name: result.report.reporter_name, caseNumber: decision.case_number, reportReference: result.report.reference_no, reason: decision.reason })
+      ? await withWarningEmailLock(reportId, () => sendFalseReportWarning({ to: decision.reporter_email, name: result.report.reporter_name, caseNumber: decision.case_number, reportReference: result.report.reference_no, reason: decision.reason }))
       : { status: "SKIPPED_NO_ACCOUNT", error: "No authenticated citizen account is linked to this report." };
-    await updateFalseReportWarningEmail(req.params.id, emailResult);
+    await updateFalseReportWarningEmail(reportId, emailResult);
     decision.warning_email_status = emailResult.status;
     decision.warning_email_attempted_at = new Date().toISOString();
     decision.warning_email_error = emailResult.error || null;
@@ -126,12 +157,21 @@ export async function markFalseReport(req, res) {
       name: result.report.reporter_name,
       report: result.report,
       action: `Confirmed false-report decision: ${decision.action}`,
-      details: [`False-report case ${decision.case_number}`, `Authority reason: ${decision.reason}`, decision.evidence_summary ? `Evidence reviewed: ${decision.evidence_summary}` : null, decision.points_deducted ? `${decision.points_deducted} wallet points deducted` : null],
+      details: [`False-report case ${decision.case_number}`, `Authority reason: ${decision.reason}`, decision.evidence_summary ? `Evidence reviewed: ${decision.evidence_summary}` : null, decision.points_deducted ? `${decision.points_deducted} wallet points deducted` : null, decision.action === "ACCOUNT_BLOCK" ? "Your account is blocked from submitting new reports. You can still sign in, view your reports and wallet, and submit an appeal." : null],
     });
-    decision.action_email_status = emailResult.status;
+    await updateFalseReportActionEmail(reportId, emailResult);
+    Object.assign(decision, { action_email_status: emailResult.status, action_email_attempted_at: new Date().toISOString(), action_email_error: emailResult.error || null });
+    const nested = result.report.false_report_case || result.report.false_report_cases?.[0];
+    if (nested) Object.assign(nested, decision);
   }
-  if (decision.action === "ACCOUNT_BLOCK") blockMockCitizenAccount(decision.citizen_user_id);
-  result.report.false_report_account_count = Number(decision.case_number || 0);
+  result.report.false_report_account_count = decision.citizen_user_id
+    ? await getFalseReportCount({ userId: decision.citizen_user_id })
+    : 0;
+  return result;
+}
+
+export async function markFalseReport(req, res) {
+  const result = await recordFalseReportDecision(req, req.params.id, req.body);
   return res.json({ decision: result.decision, report: result.report });
 }
 
@@ -142,7 +182,8 @@ export async function retryFalseReportWarningEmail(req, res) {
   if (!decision || decision.action !== "WARNING") return res.status(409).json({ error: "WARNING_EMAIL_NOT_APPLICABLE", message: "This report does not have a warning email to send." });
   if (!decision.citizen_user_id || !decision.reporter_email) return res.status(409).json({ error: "WARNING_EMAIL_NO_ACCOUNT", message: "No authenticated citizen account is linked to this warning." });
   if (decision.warning_email_status === "SENT") return res.status(409).json({ error: "WARNING_EMAIL_ALREADY_SENT", message: "The warning email was already delivered." });
-  const result = await sendFalseReportWarning({ to: decision.reporter_email, name: report.reporter_name, caseNumber: decision.case_number, reportReference: report.reference_no, reason: decision.reason });
+  if (!["PENDING", "FAILED", "NOT_CONFIGURED", null, undefined].includes(decision.warning_email_status)) return res.status(409).json({ error: "WARNING_EMAIL_NOT_RETRYABLE", message: "This warning email is not pending or failed." });
+  const result = await withWarningEmailLock(req.params.id, () => sendFalseReportWarning({ to: decision.reporter_email, name: report.reporter_name, caseNumber: decision.case_number, reportReference: report.reference_no, reason: decision.reason }));
   await updateFalseReportWarningEmail(req.params.id, result);
   Object.assign(decision, { warning_email_status: result.status, warning_email_attempted_at: new Date().toISOString(), warning_email_error: result.error || null, warning_email_provider_id: result.providerId || null });
   report.false_report_account_count = Number(decision.case_number || 0);

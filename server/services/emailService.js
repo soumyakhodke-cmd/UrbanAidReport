@@ -1,17 +1,87 @@
+import fs from "node:fs";
+import path from "node:path";
 import tls from "node:tls";
 import { config } from "../config/env.js";
 
 const escapeHtml = (value) => String(value || "").replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character]);
 const cleanHeader = (value) => String(value || "").replace(/[\r\n]/g, " ").trim();
 const encodeHeader = (value) => `=?UTF-8?B?${Buffer.from(cleanHeader(value), "utf8").toString("base64")}?=`;
-const configured = () => Boolean(config.smtpHost && config.smtpUser && config.smtpAppPassword && config.emailFrom);
+const diagnosticMessages = {
+  NOT_CONFIGURED: "Email is not configured. Set SMTP_USER, SMTP_APP_PASSWORD, and EMAIL_FROM on the server.",
+  INVALID_CONFIGURATION: "SMTP settings are invalid. Use smtp.gmail.com with port 465 (implicit TLS) and make EMAIL_FROM match SMTP_USER.",
+  TLS_CERTIFICATE: "SMTP TLS certificate validation failed. Check the network or provide the trusted inspection CA using SMTP_TLS_CA_FILE.",
+  SMTP_AUTHENTICATION: "Gmail rejected SMTP authentication. Check SMTP_USER and use a current Google App Password.",
+  SMTP_APP_PASSWORD_REQUIRED: "Gmail requires an App Password. Create one while signed into the same Google account configured as SMTP_USER, then save it as SMTP_APP_PASSWORD.",
+  SMTP_BROWSER_LOGIN_REQUIRED: "Gmail requires an account security check. Sign into that Gmail account in a browser, complete any security prompts, then run the SMTP verification again.",
+  SMTP_TIMEOUT: "The SMTP connection timed out. Check network access to smtp.gmail.com on port 465.",
+  SMTP_DNS: "The SMTP hostname could not be resolved. Check DNS and SMTP_HOST.",
+  SMTP_CONNECTION: "The SMTP server could not be reached. Check network access and firewall rules.",
+  SMTP_REJECTED: "The SMTP server rejected the sender, recipient, or message. Check the sender account and recipient address.",
+  SMTP_FAILED: "SMTP delivery failed. Check the server logs for a sanitized diagnostic category.",
+};
+
+export function getSmtpConfigurationStatus() {
+  const missing = [
+    ["SMTP_HOST", config.smtpHost],
+    ["SMTP_USER", config.smtpUser],
+    ["SMTP_APP_PASSWORD", config.smtpAppPassword],
+    ["EMAIL_FROM", config.emailFrom],
+  ].filter(([, value]) => !value).map(([name]) => name);
+  const senderMatch = !config.smtpUser || !config.emailFrom || extractAddress(config.emailFrom).toLowerCase() === config.smtpUser.toLowerCase();
+  const valid = !missing.length && Boolean(config.smtpHost) && config.smtpPort === 465 && senderMatch;
+  return { configured: valid, missing, host: config.smtpHost || null, port: Number.isFinite(config.smtpPort) ? config.smtpPort : null, secureMode: config.smtpPort === 465 ? "implicit TLS" : "invalid", senderMatch };
+}
+
+function extractAddress(value) {
+  const match = String(value || "").match(/<([^<>]+)>/);
+  return (match ? match[1] : String(value || "")).trim();
+}
+
+export function classifySmtpError(error) {
+  const code = String(error?.code || "").toUpperCase();
+  const message = String(error?.message || "");
+  const smtpCode = Number(message.match(/(?:SMTP rejected a command:\s*)?(\d{3})[ -]/)?.[1] || 0);
+  const enhancedCode = message.match(/\b(?:534|535)[ -](5\.\d+\.\d+)\b/i)?.[1] || null;
+  let category = "SMTP_FAILED";
+  if (code === "INVALID_SMTP_CONFIGURATION") category = "INVALID_CONFIGURATION";
+  else if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ALTNAME|ISSUER/.test(code) || /certificate|self-signed/i.test(message)) category = "TLS_CERTIFICATE";
+  else if (enhancedCode === "5.7.9" || enhancedCode === "5.7.90") category = "SMTP_APP_PASSWORD_REQUIRED";
+  else if (enhancedCode === "5.7.14") category = "SMTP_BROWSER_LOGIN_REQUIRED";
+  else if (/535|534|authentication|invalid credentials/i.test(message) || error?.smtpCommand === "AUTH") category = "SMTP_AUTHENTICATION";
+  else if (code === "ETIMEDOUT" || code === "ESOCKETTIMEDOUT" || /timed out|timeout/i.test(message)) category = "SMTP_TIMEOUT";
+  else if (["ENOTFOUND", "EAI_AGAIN", "ENODATA"].includes(code)) category = "SMTP_DNS";
+  else if (["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "EPIPE"].includes(code)) category = "SMTP_CONNECTION";
+  else if (smtpCode >= 400 || /SMTP rejected a command|recipient email address/i.test(message)) category = "SMTP_REJECTED";
+  return { category, message: diagnosticMessages[category], providerCode: enhancedCode || code || (smtpCode ? String(smtpCode) : null) };
+}
 
 function smtpConnection() {
   return new Promise((resolve, reject) => {
-    const socket = tls.connect({ host: config.smtpHost, port: config.smtpPort, servername: config.smtpHost, timeout: 20000 }, () => resolve(socket));
+    if (config.smtpPort !== 465) return reject(Object.assign(new Error("This SMTP transport uses implicit TLS on port 465."), { code: "INVALID_SMTP_CONFIGURATION" }));
+    const tlsOptions = { host: config.smtpHost, port: config.smtpPort, servername: config.smtpHost, timeout: 20000, rejectUnauthorized: true };
+    if (config.smtpTlsCaFile) {
+      const caPath = path.resolve(process.cwd(), config.smtpTlsCaFile);
+      // Trust the normal Node roots plus the administrator-provided network CA.
+      // Keep certificate verification enabled; never bypass TLS validation.
+      try {
+        const ca = fs.readFileSync(caPath);
+        if (!ca.includes(Buffer.from("-----BEGIN CERTIFICATE-----"))) throw new Error("Invalid CA file.");
+        tlsOptions.ca = [...tls.rootCertificates, ca];
+      } catch {
+        return reject(Object.assign(new Error("Configured SMTP CA file is missing or invalid."), { code: "INVALID_SMTP_CONFIGURATION" }));
+      }
+    }
+    const socket = tls.connect(tlsOptions, () => resolve(socket));
     socket.once("error", reject);
     socket.once("timeout", () => socket.destroy(new Error("SMTP connection timed out.")));
   });
+}
+
+let activeSmtpSender = smtpSend;
+export function setSmtpSenderForTests(sender) {
+  const previous = activeSmtpSender;
+  activeSmtpSender = sender;
+  return () => { activeSmtpSender = previous; };
 }
 
 function createReplyReader(socket) {
@@ -44,13 +114,41 @@ async function readSmtpReply(readLine, expected) {
   return lines.join("\n");
 }
 
+export async function verifySmtpConnection() {
+  const settings = getSmtpConfigurationStatus();
+  if (settings.missing.length) return { status: "NOT_CONFIGURED", category: "NOT_CONFIGURED", message: `${diagnosticMessages.NOT_CONFIGURED} Missing: ${settings.missing.join(", ")}.` };
+  if (!settings.configured) return { status: "FAILED", category: "INVALID_CONFIGURATION", message: diagnosticMessages.INVALID_CONFIGURATION };
+  let socket;
+  try {
+    socket = await smtpConnection();
+    const readLine = createReplyReader(socket);
+    const command = async (line, expected) => { socket.write(`${line}\r\n`); return readSmtpReply(readLine, expected); };
+    await readSmtpReply(readLine, 220);
+    await command("EHLO urban-aid-report.local", 250);
+    await command("AUTH LOGIN", 334);
+    await command(Buffer.from(config.smtpUser).toString("base64"), 334);
+    await command(Buffer.from(config.smtpAppPassword).toString("base64"), 235);
+    socket.end("QUIT\r\n");
+    return { status: "READY", category: null, message: "Gmail accepted the SMTP connection and authentication. No email was sent." };
+  } catch (error) {
+    const diagnostic = classifySmtpError(error);
+    console.error("SMTP verification failed", { category: diagnostic.category, providerCode: diagnostic.providerCode });
+    return { status: "FAILED", category: diagnostic.category, message: diagnostic.message };
+  } finally {
+    socket?.end();
+  }
+}
+
 async function smtpSend({ to, subject, text, html }) {
+  if (config.smtpPort !== 465) throw Object.assign(new Error("The SMTP transport currently requires implicit TLS on port 465."), { code: "INVALID_SMTP_CONFIGURATION" });
+  const senderAddress = extractAddress(config.emailFrom);
+  if (senderAddress.toLowerCase() !== config.smtpUser.toLowerCase()) throw Object.assign(new Error("Gmail sender must match the authenticated account."), { code: "INVALID_SMTP_CONFIGURATION" });
   const socket = await smtpConnection();
   const readLine = createReplyReader(socket);
   const command = async (line, expected) => { socket.write(`${line}\r\n`); return readSmtpReply(readLine, expected); };
   try {
     await readSmtpReply(readLine, 220);
-    await command(`EHLO ${config.smtpHost}`, 250);
+    await command("EHLO urban-aid-report.local", 250);
     await command("AUTH LOGIN", 334);
     await command(Buffer.from(config.smtpUser).toString("base64"), 334);
     await command(Buffer.from(config.smtpAppPassword).toString("base64"), 235);
@@ -72,7 +170,9 @@ async function smtpSend({ to, subject, text, html }) {
     ].join("\r\n").replace(/(^|\r\n)\./g, "$1..");
     socket.write(`${message}\r\n.\r\n`);
     const accepted = await readSmtpReply(readLine, 250);
-    await command("QUIT", 221);
+    // DATA's final 250 is the SMTP acceptance point. A later QUIT failure must
+    // not mark an accepted message as failed and cause duplicate retries.
+    socket.end("QUIT\r\n");
     return { status: "SENT", providerId: accepted.match(/(?:queued as|id[= ])\s*([\w-]+)/i)?.[1] || null };
   } finally {
     socket.end();
@@ -81,18 +181,35 @@ async function smtpSend({ to, subject, text, html }) {
 
 async function sendEmail({ to, subject, text, html }) {
   if (!to) return { status: "FAILED", error: "The report has no recipient email address." };
-  if (!configured()) return { status: "NOT_CONFIGURED", error: "Configure SMTP_USER, SMTP_APP_PASSWORD, and EMAIL_FROM to deliver citizen notifications." };
+  const settings = getSmtpConfigurationStatus();
+  if (settings.missing.length) return { status: "NOT_CONFIGURED", error: `${diagnosticMessages.NOT_CONFIGURED} Missing: ${settings.missing.join(", ")}.`, errorCategory: "NOT_CONFIGURED" };
+  if (!settings.configured) return { status: "FAILED", error: diagnosticMessages.INVALID_CONFIGURATION, errorCategory: "INVALID_CONFIGURATION" };
   try {
-    return await smtpSend({ to, subject, text, html });
+    return await activeSmtpSender({ to, subject, text, html });
   } catch (error) {
-    return { status: "FAILED", error: String(error.message || "Email delivery failed.").slice(0, 500) };
+    const diagnostic = classifySmtpError(error);
+    // Keep logs useful while excluding addresses, message content, and credentials.
+    console.error("SMTP delivery failed", { category: diagnostic.category, providerCode: diagnostic.providerCode });
+    return { status: "FAILED", error: diagnostic.message, errorCategory: diagnostic.category };
   }
+}
+
+export function logSmtpStartupStatus() {
+  const status = getSmtpConfigurationStatus();
+  if (!status.configured) {
+    const details = status.missing.length ? ` Missing settings: ${status.missing.join(", ")}.` : " Check SMTP_HOST, SMTP_PORT, and sender alignment.";
+    console.warn(`SMTP notifications are unavailable.${details}`);
+    return status;
+  }
+  console.info(`SMTP configuration loaded for ${status.host}:${status.port} (${status.secureMode}); certificate verification is enabled. No test email was sent.`);
+  return status;
 }
 
 export async function sendFalseReportWarning({ to, name, caseNumber, reportReference, reason }) {
   const subject = `Authority warning for report ${reportReference}`;
-  const text = `Hello ${name || "Citizen"},\n\nThe municipal authority has recorded confirmed false-report case ${caseNumber} for report ${reportReference}.\n\nAuthority reason: ${reason}\n\nIf you believe this decision is incorrect, sign in to Urban Aid Report, open My Reports, and submit an appeal. The authority must review it.\n\nUrban Aid Report`;
-  const html = `<p>Hello ${escapeHtml(name || "Citizen")},</p><p>The municipal authority has recorded confirmed false-report case <strong>${caseNumber}</strong> for report <strong>${escapeHtml(reportReference)}</strong>.</p><p><strong>Authority reason:</strong> ${escapeHtml(reason)}</p><p>If you believe this decision is incorrect, sign in to Urban Aid Report, open My Reports, and submit an appeal. The authority must review it.</p><p>Urban Aid Report</p>`;
+  const policy = "Cases 1–2 receive warning emails; cases 3–5 may deduct available reward points (up to the configured amount); case 6 and later block new report submissions. You may still sign in, view your reports and wallet, and appeal a decision.";
+  const text = `Hello ${name || "Citizen"},\n\nThe municipal authority has recorded confirmed false-report case ${caseNumber} for report ${reportReference}.\n\nAuthority reason: ${reason}\n\nAccount policy: ${policy}\n\nIf you believe this decision is incorrect, sign in to Urban Aid Report, open My Reports, and submit an appeal. The authority must review it.\n\nUrban Aid Report`;
+  const html = `<p>Hello ${escapeHtml(name || "Citizen")},</p><p>The municipal authority has recorded confirmed false-report case <strong>${caseNumber}</strong> for report <strong>${escapeHtml(reportReference)}</strong>.</p><p><strong>Authority reason:</strong> ${escapeHtml(reason)}</p><p><strong>Account policy:</strong> ${escapeHtml(policy)}</p><p>If you believe this decision is incorrect, sign in to Urban Aid Report, open My Reports, and submit an appeal. The authority must review it.</p><p>Urban Aid Report</p>`;
   return sendEmail({ to, subject, text, html });
 }
 

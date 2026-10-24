@@ -29,8 +29,9 @@ For development with server restarts, run `npm run dev`.
 | `ALLOWED_ORIGINS` | No | Comma-separated origins if the frontend is hosted separately. |
 | `FALSE_REPORT_POINT_DEDUCTION` | No | Points deducted for each authority-confirmed case 3–5; defaults to 25 and cannot reduce a wallet below zero. |
 | `SMTP_HOST` | No | SMTP server; defaults to Gmail's `smtp.gmail.com`. |
-| `SMTP_PORT` | No | SMTP TLS port; defaults to `465`. |
-| `SMTP_USER` | No | Authority sender mailbox; this project is preconfigured for `urbanaid88@gmail.com`. |
+| `SMTP_PORT` | No | Gmail implicit-TLS port; this SMTP implementation requires `465`. |
+| `SMTP_TLS_CA_FILE` | No | Optional PEM CA file used only when an approved network TLS inspection certificate must be trusted. Leave blank for direct Gmail SMTP. |
+| `SMTP_USER` | No | Authority sender mailbox; configured locally as `urbanaidreport@gmail.com`. |
 | `SMTP_APP_PASSWORD` | No | Gmail App Password stored only in the server environment. Never use or commit the account login password. |
 | `EMAIL_FROM` | No | Sender label and mailbox shown to citizens. |
 
@@ -39,6 +40,12 @@ For development with server restarts, run `npm run dev`.
 Only an authenticated authority can record a false-report finding. The authority must enter a specific reason and evidence summary and attest that the finding is intentional. A duplicate, honest mistake, or an issue that staff could not locate does not alone establish intentional false reporting. The account-level count is visible in the citizen report history and authority case view. Cases 1 and 2 generate a warning email. Cases 3, 4, and 5 deduct the configured points for each finding, up to the citizen's available balance. Case 6 and later block the account from submitting new reports. Sign-in and read access remain available so the citizen can review the record and appeal. Repeat sanctions require a stable authenticated account; unauthenticated or unverified-email reports do not accumulate the count. Authority report updates, false-report decisions, and appeal decisions send an automatic email to the citizen. If delivery fails or email is not configured, the authority action remains recorded; configure SMTP and retry warning emails from the authority view where available.
 
 For Gmail delivery, enable 2-Step Verification on the sender account, create an App Password in Google Account security settings, and set it as `SMTP_APP_PASSWORD` in the server's ignored `.env` file or deployment secret settings. Do not use the regular Gmail sign-in password. Email is sent directly through Gmail SMTP over TLS; the app password is never sent to the browser.
+
+The server prints a sanitized SMTP configuration summary at startup; it never prints credentials. Delivery diagnostics distinguish TLS, authentication, DNS, timeout, connection, and SMTP rejection errors. A message is recorded as sent only after Gmail accepts the SMTP message data. The configured Gmail mode is implicit TLS on port 465.
+
+To verify SMTP network access and Gmail authentication without sending an email, stop the server and run `npm run email:verify` from the project folder. It prints only the SMTP host/port and a sanitized result; it does not print the username, app password, or recipient.
+
+If email reports `self-signed certificate in certificate chain`, the current network or security software is presenting a TLS certificate chain Node.js does not trust. This occurs before Gmail checks the app password, so changing the password will not fix that TLS handshake. Ask the network administrator for the trusted root CA in PEM format, place the public certificate in a protected local file, set `SMTP_TLS_CA_FILE` to its path, and restart the server. The setting adds that CA alongside Node's regular roots; certificate and hostname validation remain enabled. Do not disable certificate verification or trust a certificate from an unknown source. A mobile-hotspot test can help establish whether the ordinary network is intercepting SMTP, but does not itself fix the network configuration.
 
 Citizens see the authority's finding in their own report history and can submit one appeal, including while reporting is blocked. The authority must record a review note when accepting or upholding it. Accepting an appeal restores deducted points and returns the report to review; accepted findings no longer count toward the account threshold, and the reporting restriction clears when five or fewer confirmed cases remain. The appeal and point transactions remain auditable in the case record and wallet history.
 
@@ -59,8 +66,8 @@ The app currently runs in local demo mode and does not connect to Supabase. Repo
 | `GET` | `/api/reports?reporter_email=` | Citizen report tracker. |
 | `GET` | `/api/reports/:id` | Public report detail without reporter contact data. |
 | `GET` | `/api/reports/admin/all` | Authority report list; requires an authenticated Authority session. |
-| `PATCH` | `/api/reports/:id` | Authority final category/severity, status, priority, assignment, and update; requires an authenticated Authority session. |
-| `POST` | `/api/reports/:id/false-report` | Authority records an evidence-backed decision; requires authority authentication and confirmation. |
+| `PATCH` | `/api/reports/:id` | Authority final category/severity, status, priority, assignment, and update; requires an authenticated Authority session. Selecting Rejected requires a reason, evidence summary, and explicit authority confirmation. |
+| `POST` | `/api/reports/:id/false-report` | Backward-compatible authority decision endpoint; uses the same evidence-backed validation and sanction logic as Rejected status. |
 | `POST` | `/api/reports/:id/false-report-warning-email/retry` | Authority retries a failed or unconfigured case 1–2 warning email. |
 | `POST` | `/api/reports/:id/false-report-appeal` | Reporting citizen submits one appeal. |
 | `POST` | `/api/reports/:id/false-report-appeal/review` | Authority accepts or upholds a pending appeal with a review note. |

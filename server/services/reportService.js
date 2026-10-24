@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { config } from "../config/env.js";
 import { requireSupabase } from "../config/supabase.js";
-import { syncMockCitizenAccountBlock } from "./authService.js";
+import { blockMockCitizenAccount, syncMockCitizenAccountBlock } from "./authService.js";
 import { awardReportResolution, deductFalseReportPoints, restoreFalseReportPoints } from "./rewardService.js";
 
 export const reportColumns = "id,user_id,reference_no,title,category,description,location,additional_info,status,priority,severity,severity_score,reporter_name,reporter_email,reporter_phone,assigned_to,image_url,image_path,reward_points,rewarded_at,created_at,updated_at";
@@ -16,13 +16,13 @@ function citizenReport(report) {
   const nestedCase = report.false_report_cases ?? report.false_report_case;
   const decision = Array.isArray(nestedCase) ? nestedCase[0] : nestedCase;
   if (decision) {
-    const { reporter_email, citizen_user_id, decided_by_user_id, appeal_reviewed_by_user_id, warning_email_error, ...citizenDecision } = decision;
+    const { reporter_email, citizen_user_id, decided_by_user_id, appeal_reviewed_by_user_id, warning_email_error, action_email_error, ...citizenDecision } = decision;
     safe.false_report_case = citizenDecision;
   }
   return safe;
 }
 
-const falseCaseSelect = "false_report_cases(report_id,case_number,action,reason,evidence_summary,points_deducted,penalty_amount,penalty_status,penalty_policy_reference,decided_by_name,decided_at,appeal_status,appeal_message,appealed_at,appeal_review_note,appeal_reviewed_by_name,appeal_reviewed_at,warning_email_status,warning_email_attempted_at,warning_email_provider_id,warning_email_error,reporter_email,citizen_user_id,decided_by_user_id,appeal_reviewed_by_user_id)";
+const falseCaseSelect = "false_report_cases(report_id,case_number,action,reason,evidence_summary,points_deducted,penalty_amount,penalty_status,penalty_policy_reference,decided_by_name,decided_at,appeal_status,appeal_message,appealed_at,appeal_review_note,appeal_reviewed_by_name,appeal_reviewed_at,warning_email_status,warning_email_attempted_at,warning_email_provider_id,warning_email_error,action_email_status,action_email_attempted_at,action_email_provider_id,action_email_error,reporter_email,citizen_user_id,decided_by_user_id,appeal_reviewed_by_user_id)";
 
 function logSupabaseError(operation, error) {
   if (config.nodeEnv === "production" || !error) return;
@@ -84,6 +84,10 @@ export const mockReports = [
     report_updates: []
   }
 ];
+
+// Serializes local-demo decisions by account. This keeps two concurrent
+// rejection requests from receiving the same case number or deducting twice.
+const falseDecisionLocks = new Map();
 
 export async function uploadImage(file) {
   if (!file) return null;
@@ -192,7 +196,23 @@ export async function getReport(id, includePrivate = false, includeFalseCase = f
   return includePrivate ? data : includeFalseCase ? citizenReport(data) : publicReport(data);
 }
 
-export async function confirmFalseReport({ reportId, reason, evidenceSummary, authorityUser, authorityName }) {
+export async function confirmFalseReport(args) {
+  const report = !config.isSupabaseConfigured ? mockReports.find((item) => item.id === args.reportId) : null;
+  const lockKey = !config.isSupabaseConfigured ? `citizen:${report?.user_id || report?.id || args.reportId}` : null;
+  if (!lockKey) return confirmFalseReportUnlocked(args);
+  const previous = falseDecisionLocks.get(lockKey) || Promise.resolve();
+  let release;
+  const queued = new Promise((resolve) => { release = resolve; });
+  falseDecisionLocks.set(lockKey, queued);
+  await previous;
+  try { return await confirmFalseReportUnlocked(args); }
+  finally {
+    release();
+    if (falseDecisionLocks.get(lockKey) === queued) falseDecisionLocks.delete(lockKey);
+  }
+}
+
+async function confirmFalseReportUnlocked({ reportId, reason, evidenceSummary, authorityUser, authorityName }) {
   const cleanReason = String(reason || "").trim();
   const cleanEvidence = String(evidenceSummary || "").trim();
   if (cleanReason.length < 10 || cleanReason.length > 500) throw Object.assign(new Error("Provide a reason between 10 and 500 characters."), { status: 422, code: "FALSE_REPORT_REASON_INVALID" });
@@ -207,14 +227,14 @@ export async function confirmFalseReport({ reportId, reason, evidenceSummary, au
     // Only a stable authenticated account can accumulate repeat sanctions.
     const caseNumber = report.user_id ? mockReports.filter((item) => item.false_report_case && item.false_report_case.appeal_status !== "ACCEPTED" && item.user_id === report.user_id).length + 1 : 1;
     const action = caseNumber <= 2 ? "WARNING" : caseNumber <= 5 ? "POINT_DEDUCTION" : "ACCOUNT_BLOCK";
-    const pointsDeducted = action === "POINT_DEDUCTION" ? await deductFalseReportPoints({ userId: report.user_id, report, requestedPoints: config.falseReportPointDeduction }) : 0;
+    const deductionPromise = action === "POINT_DEDUCTION" ? deductFalseReportPoints({ userId: report.user_id, report, requestedPoints: config.falseReportPointDeduction, caseNumber }) : Promise.resolve(0);
     const decision = {
       report_id: report.id,
       case_number: caseNumber,
       action,
       reason: cleanReason,
       evidence_summary: cleanEvidence,
-      points_deducted: pointsDeducted || 0,
+      points_deducted: 0,
       penalty_amount: null,
       penalty_status: "NOT_APPLICABLE",
       penalty_policy_reference: null,
@@ -228,6 +248,8 @@ export async function confirmFalseReport({ reportId, reason, evidenceSummary, au
     report.false_report_case = decision;
     report.status = "REJECTED";
     report.updated_at = decision.decided_at;
+    if (action === "ACCOUNT_BLOCK") blockMockCitizenAccount(report.user_id);
+    decision.points_deducted = await deductionPromise;
     return { decision, report };
   }
 
@@ -263,11 +285,26 @@ export async function updateFalseReportWarningEmail(reportId, result) {
   if (error) logSupabaseError("false_report.warning_email_status", error);
 }
 
+export async function updateFalseReportActionEmail(reportId, result) {
+  const values = {
+    action_email_status: result.status,
+    action_email_attempted_at: new Date().toISOString(),
+    action_email_provider_id: result.providerId || null,
+    action_email_error: result.error || null,
+  };
+  if (!config.isSupabaseConfigured) {
+    const report = mockReports.find((item) => item.id === reportId);
+    if (report?.false_report_case) Object.assign(report.false_report_case, values);
+    return;
+  }
+  const { error } = await requireSupabase().from("false_report_cases").update(values).eq("report_id", reportId);
+  if (error) logSupabaseError("false_report.action_email_status", error);
+}
+
 export async function getFalseReportCount({ userId, email }) {
   if (!config.isSupabaseConfigured) {
-    return mockReports.filter((report) => report.false_report_case && report.false_report_case.appeal_status !== "ACCEPTED" && (
-      userId ? report.user_id === userId : String(report.reporter_email || "").toLowerCase() === String(email || "").toLowerCase()
-    )).length;
+    if (!userId) return 0;
+    return mockReports.filter((report) => report.false_report_case && report.false_report_case.appeal_status !== "ACCEPTED" && report.user_id === userId).length;
   }
   if (!userId) return 0;
   const { count, error } = await requireSupabase().from("false_report_cases").select("report_id", { count: "exact", head: true }).eq("citizen_user_id", userId).neq("appeal_status", "ACCEPTED");

@@ -2,6 +2,7 @@ const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const state = { reports: [], adminReports: [], activeModalReport: null, authRole: "citizen", authFormMode: "signin", currentUser: null };
 let reportImagePreviewUrl = null;
+let resolveFalseReportDialog = null;
 const t = (value) => window.urbanAidI18n?.t(value) || value;
 
 // Initialize cached user synchronously from sessionStorage to prevent flash of unauthenticated state
@@ -472,6 +473,7 @@ async function loadProfile() {
       $("#profile-total-reports").textContent = String(summary.total);
       $("#profile-resolved-reports").textContent = String(summary.resolved);
       $("#profile-active-reports").textContent = String(summary.active);
+      $("#profile-false-report-count").textContent = String(Number(reportsResult.value.falseReportCount || 0));
       renderProfileReports(reports.slice(0, 5));
     } else { hasError = true; $("#profile-recent-reports").innerHTML = '<p class="profile-muted">Your reports could not be loaded.</p>'; }
     if (walletResult.status === "fulfilled" && walletResult.value.wallet) renderProfileWallet(walletResult.value.wallet);
@@ -482,6 +484,17 @@ async function loadProfile() {
     }
   } catch (error) {
     if (status) { status.hidden = false; status.innerHTML = `${escapeHtml(error.message)} <button type="button" id="profile-retry" class="profile-text-button">Retry</button>`; }
+  }
+}
+
+async function refreshProfileFalseReportCount() {
+  if (location.hash !== "#profile" || state.currentUser?.role !== "citizen") return;
+  try {
+    const result = await api("/api/reports/mine/false-report-count");
+    const counter = $("#profile-false-report-count");
+    if (counter) counter.textContent = String(Number(result.falseReportCount || 0));
+  } catch {
+    // Keep the last successfully loaded count visible if a background refresh fails.
   }
 }
 
@@ -655,13 +668,12 @@ async function loadCitizenDashboard() {
   const nameEl = $("#cd-user-name");
   if (nameEl) nameEl.textContent = user.name || "Citizen";
 
-  // If reports not yet loaded, fetch them
-  if (!state.reports.length) {
-    try {
-      const data = await api("/api/reports/mine");
-      state.reports = data.reports;
-    } catch {}
-  }
+  // Refresh on every dashboard entry so authority decisions made in another
+  // session appear without requiring the citizen to clear browser state.
+  try {
+    const data = await api("/api/reports/mine");
+    state.reports = data.reports || [];
+  } catch {}
 
   const reports = state.reports;
   const count = (test) => reports.filter(test).length;
@@ -789,7 +801,8 @@ function reportCard(report, admin = false) {
     const warningEmail = decision.action === "WARNING" ? `<p>${t("Warning email status")}: ${escapeHtml(t((decision.warning_email_status || "PENDING").replaceAll("_", " ")))}.</p>` : "";
     const appealForm = decision.appeal_status === "NOT_FILED" ? `<details class="false-report-citizen-appeal"><summary>Appeal this decision</summary><form data-false-report-appeal="${report.id}"><label for="appeal-${report.id}">Explain why you believe this decision is incorrect</label><textarea id="appeal-${report.id}" name="message" minlength="10" maxlength="1000" required placeholder="Share any details that could help the authority review your case."></textarea><button class="button button-outline" type="submit">Submit appeal</button></form></details>` : "";
     const pointMessage = decision.appeal_status === "ACCEPTED" && decision.points_deducted ? `${decision.points_deducted} ${t("points were restored after appeal.")}` : decision.points_deducted ? `${decision.points_deducted} ${t("points were deducted from your wallet.")}` : decision.action === "POINT_DEDUCTION" ? t("No wallet points were available to deduct.") : "";
-    decisionHtml = `<aside class="citizen-false-report-notice"><strong>${t("Authority decision")} · ${t("Case")} ${decision.case_number}: ${escapeHtml(t(actionLabels[decision.action] || decision.action))}</strong><p>${escapeHtml(decision.reason || "")}</p>${warningEmail}${pointMessage ? `<p>${pointMessage}</p>` : ""}${accountBlocked}${penalty}${appealStatus ? `<p>${t(appealStatus)}</p>` : ""}${appealForm}</aside>`;
+    const decisionHeading = decision.action === "OVERTURNED" ? t("Authority overturned the false-report decision") : t("Authority marked this report as false");
+    decisionHtml = `<aside class="citizen-false-report-notice"><strong>${decisionHeading} · ${t("Case")} ${decision.case_number}: ${escapeHtml(t(actionLabels[decision.action] || decision.action))}</strong><p><strong>${t("Authority reason")}:</strong> ${escapeHtml(decision.reason || "")}</p>${warningEmail}${pointMessage ? `<p>${pointMessage}</p>` : ""}${accountBlocked}${penalty}${appealStatus ? `<p>${escapeHtml(t(appealStatus))}</p>` : ""}${appealForm}</aside>`;
   }
   const adminDecision = decision && admin ? `<span class="badge badge-false-report">False case ${Number(decision.case_number || 0)} · ${escapeHtml(actionLabels[decision.action] || decision.action)}</span>` : "";
   return `<article class="report-card"><div>${image}</div><div class="report-card-main"><div class="report-ref">${escapeHtml(report.reference_no)}</div><h2><button type="button" data-report-id="${report.id}">${title}</button></h2><div class="report-meta"><span>${escapeHtml(categoryLabels[report.category] || report.category)}</span><span>${location}</span><span>${formatDate(report.created_at)}</span></div>${admin && report.assigned_to ? `<div class="report-meta"><span>Assigned: ${escapeHtml(report.assigned_to)}</span></div>` : ""}${decisionHtml}</div><div class="card-status">${badge(report.status, "status")}${badge(report.priority, "priority")}${adminDecision}${rewardHtml}</div></article>`;
@@ -1054,7 +1067,6 @@ async function saveAdminUpdate(event) {
     } else {
       toast("Report update saved.", "success");
     }
-    if (data.notification?.status !== "SENT") toast("Citizen email was not sent. Check the server SMTP settings.", "error");
     loadAdminReports();
   } catch (error) {
     toast(error.message, "error");
@@ -1327,42 +1339,44 @@ function renderAdminDetail(report) {
   if (severitySelect) severitySelect.onchange = livePreview;
   if (prioritySelect) prioritySelect.onchange = livePreview;
 
-  // Authority-only false-report decision and appeal controls.
+  // Authority-only decision summary, warning retry, and appeal review.
   const falseCaseValue = report.false_report_case || report.false_report_cases;
   const falseCase = Array.isArray(falseCaseValue) ? falseCaseValue[0] : falseCaseValue;
-  const falseForm = $("#false-report-form");
+  const statusControl = $("#detail-select-status");
+  if (statusControl) {
+    const rejectOption = statusControl.querySelector('option[value="REJECTED"]');
+    if (rejectOption) rejectOption.disabled = Boolean(falseCase) && report.status !== "REJECTED";
+  }
   const decisionSummary = $("#false-report-decision-summary");
-  const stageEl = $("#false-report-stage");
   const appealReview = $("#false-report-appeal-review");
   const appealMessage = $("#false-report-appeal-message");
   const accountCount = $("#false-report-account-count");
   const confirmedCount = Number(report.false_report_account_count ?? falseCase?.case_number ?? 0);
-  if (accountCount) accountCount.textContent = report.user_id
-    ? `${t("Confirmed false reports on this account")}: ${confirmedCount}. ${t("Cases 1–2 receive warning emails; cases 3–5 lose points; case 6 and later blocks report submission.")}`
-    : t("No authenticated citizen account is linked to this report; account-level repeat sanctions cannot be applied.");
+  if (accountCount) {
+    accountCount.hidden = false;
+    accountCount.textContent = report.user_id
+      ? `${t("Confirmed false reports on this account")}: ${confirmedCount}. ${t("Cases 1–2 receive warning emails; cases 3–5 lose points; case 6 and later blocks report submission.")}`
+      : t("No authenticated citizen account is linked to this report; account-level repeat sanctions cannot be applied.");
+  }
   const falseLabels = { WARNING: "Cases 1–2 · warning", POINT_DEDUCTION: "Cases 3–5 · point deduction", ACCOUNT_BLOCK: "More than 5 cases · account blocked", PENALTY_REVIEW: "Legacy penalty review", PENALTY_NOTICE: "Legacy penalty notice", OVERTURNED: "Decision overturned" };
   if (falseCase) {
-    if (falseForm) falseForm.hidden = true;
-    if (stageEl) stageEl.textContent = falseLabels[falseCase.action] || falseCase.action;
     if (decisionSummary) {
-      decisionSummary.hidden = false;
-      const canRetryWarning = falseCase.action === "WARNING" && falseCase.warning_email_status !== "SENT" && falseCase.citizen_user_id;
-      const warningStatus = falseCase.action === "WARNING" ? `<p>Warning email: ${escapeHtml((falseCase.warning_email_status || "PENDING").replaceAll("_", " "))}${falseCase.warning_email_error ? ` · ${escapeHtml(falseCase.warning_email_error)}` : ""}</p>${canRetryWarning ? `<button type="button" class="button button-outline" data-warning-email-retry="${report.id}">Send or retry warning email</button>` : ""}` : "";
-      const penaltySummary = falseCase.action === "PENALTY_NOTICE" ? `<p>Penalty notice: ₹${Number(falseCase.penalty_amount || 0).toFixed(2)} · ${escapeHtml(falseCase.penalty_policy_reference || "")}. Payment must follow the city's official process.</p>` : falseCase.action === "PENALTY_REVIEW" ? `<p>No monetary penalty was issued. Configure an approved city policy before using this action.</p>` : "";
-      const appealSummary = falseCase.appeal_status && falseCase.appeal_status !== "NOT_FILED" ? `<p><strong>Appeal ${escapeHtml(falseCase.appeal_status.toLowerCase())}:</strong> ${escapeHtml(falseCase.appeal_message || "")}</p>${falseCase.appeal_review_note ? `<p><strong>Authority review:</strong> ${escapeHtml(falseCase.appeal_review_note)}</p>` : ""}` : "";
-      const deductionSummary = falseCase.action === "POINT_DEDUCTION" ? Number(falseCase.points_deducted || 0) ? `<p>${Number(falseCase.points_deducted)} ${t("points deducted from the citizen wallet.")}</p>` : `<p>${t("No wallet points were available to deduct.")}</p>` : "";
-      decisionSummary.innerHTML = `<p><strong>${escapeHtml(t(falseLabels[falseCase.action] || falseCase.action))} · ${t("Case")} ${Number(falseCase.case_number || 0)}</strong></p><p><strong>${t("Authority reason")}:</strong> ${escapeHtml(falseCase.reason || "")}</p><p><strong>${t("Evidence reviewed")}:</strong> ${escapeHtml(falseCase.evidence_summary || "")}</p>${warningStatus}${deductionSummary}${falseCase.action === "ACCOUNT_BLOCK" ? `<p>${t("Blocked from submitting new reports; sign-in remains available for review and appeals.")}</p>` : ""}${penaltySummary}${appealSummary}`;
+      const showDecisionSummary = report.status !== "REJECTED";
+      decisionSummary.hidden = !showDecisionSummary;
+      if (showDecisionSummary) {
+        const canRetryWarning = falseCase.action === "WARNING" && falseCase.warning_email_status !== "SENT" && falseCase.citizen_user_id;
+        const warningStatus = falseCase.action === "WARNING" ? `<p>Warning email: ${escapeHtml((falseCase.warning_email_status || "PENDING").replaceAll("_", " "))}${falseCase.warning_email_error ? ` · ${escapeHtml(falseCase.warning_email_error)}` : ""}</p>${canRetryWarning ? `<button type="button" class="button button-outline" data-warning-email-retry="${report.id}">Send or retry warning email</button>` : ""}` : "";
+        const deductionSummary = falseCase.action === "POINT_DEDUCTION" ? Number(falseCase.points_deducted || 0) ? `<p>${Number(falseCase.points_deducted)} ${t("points deducted from the citizen wallet.")}</p>` : `<p>${t("No wallet points were available to deduct.")}</p>` : "";
+        decisionSummary.innerHTML = `<p><strong>${t("Authority decision")}: ${escapeHtml(t(falseLabels[falseCase.action] || falseCase.action))} · ${t("Case")} ${Number(falseCase.case_number || 0)}</strong></p><p><strong>${t("Authority reason")}:</strong> ${escapeHtml(falseCase.reason || "")}</p>${warningStatus}${deductionSummary}${falseCase.action === "ACCOUNT_BLOCK" ? `<p>${t("Blocked from submitting new reports; sign-in remains available for review and appeals.")}</p>` : ""}`;
+      } else {
+        decisionSummary.innerHTML = "";
+      }
     }
     if (appealReview) {
       appealReview.hidden = falseCase.appeal_status !== "PENDING";
       if (appealMessage) appealMessage.textContent = falseCase.appeal_message || "";
     }
   } else {
-    if (stageEl) stageEl.textContent = report.status === "RESOLVED" ? "Reopen before false-report review" : "Authority review only";
-    if (falseForm) {
-      falseForm.hidden = report.status === "RESOLVED";
-      falseForm.reset();
-    }
     if (decisionSummary) { decisionSummary.hidden = true; decisionSummary.textContent = ""; }
     if (appealReview) appealReview.hidden = true;
   }
@@ -1391,17 +1405,51 @@ function renderAdminDetail(report) {
   }
 }
 
+function requestFalseReportConfirmation(report) {
+  const dialog = $("#false-report-confirm-dialog");
+  const form = $("#false-report-confirm-form");
+  if (!dialog || !form || typeof dialog.showModal !== "function") return Promise.resolve(null);
+  form.reset();
+  $("#false-report-confirm-reference").textContent = `Report ${report.reference_no || report.id}`;
+  $("#false-report-confirm-account").textContent = report.user_id
+    ? `Linked citizen account: ${report.reporter_email || "authenticated account"}`
+    : "No authenticated citizen account is linked. This decision will not add an account-level repeat sanction.";
+  $("#false-report-confirm-status").hidden = true;
+  $$('[data-false-error]').forEach((node) => { node.hidden = true; });
+  dialog.showModal();
+  return new Promise((resolve) => { resolveFalseReportDialog = resolve; });
+}
+
+function finishFalseReportConfirmation(value) {
+  const dialog = $("#false-report-confirm-dialog");
+  if (!resolveFalseReportDialog) return;
+  const resolve = resolveFalseReportDialog;
+  resolveFalseReportDialog = null;
+  if (dialog?.open) dialog.close();
+  resolve(value);
+}
+
 async function saveAdminDetailUpdate(event) {
   event.preventDefault();
   const report = state.activeAdminReport;
   if (!report) return;
   const button = $("#detail-submit-btn");
+  const requestedStatus = $("#detail-select-status").value;
+  let falseReportDecision;
   if (button) {
     button.disabled = true;
-    button.textContent = "Saving…";
+    button.textContent = requestedStatus === "REJECTED" ? "Reviewing rejection…" : "Saving…";
   }
 
   try {
+    const existingCase = report.false_report_case || report.false_report_cases?.[0];
+    if (requestedStatus === "REJECTED" && !existingCase) {
+      falseReportDecision = await requestFalseReportConfirmation(report);
+      if (!falseReportDecision) {
+        $("#detail-select-status").value = report.status || "SUBMITTED";
+        return;
+      }
+    }
     const data = await api(`/api/reports/${report.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -1411,12 +1459,16 @@ async function saveAdminDetailUpdate(event) {
         priority: $("#detail-select-priority").value || undefined,
         severity: $("#detail-select-severity").value || undefined,
         assignedTo: $("#detail-input-assigned").value,
-        message: $("#detail-textarea-message").value
+        message: $("#detail-textarea-message").value,
+        falseReportDecision
       })
     });
 
-    toast("✓ Update posted successfully", "success");
-    if (data.notification?.status !== "SENT") toast("Citizen email was not sent. Check the server SMTP settings.", "error");
+    if (data.decision) {
+      toast(`Report ${report.reference_no}: false-report case ${data.decision.case_number} recorded — ${data.decision.action.replaceAll("_", " ")}.`, "success");
+    } else {
+      toast("✓ Update posted successfully", "success");
+    }
     if (data.reward?.awarded) {
       toast(`⭐ +${data.reward.points} reward points credited to citizen.`, "success");
     }
@@ -1438,35 +1490,6 @@ async function saveAdminDetailUpdate(event) {
   }
 }
 
-async function submitFalseReportDecision(event) {
-  event.preventDefault();
-  const report = state.activeAdminReport;
-  if (!report) return;
-  const form = event.currentTarget;
-  const button = form.querySelector("button[type=submit]");
-  const data = new FormData(form);
-  if (!window.confirm("Confirm that the authority reviewed the evidence and found this report intentionally false?")) return;
-  if (button) button.disabled = true;
-  try {
-    const result = await api(`/api/reports/${report.id}/false-report`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: data.get("reason"), evidenceSummary: data.get("evidence_summary"), confirmedByAuthority: data.get("confirmed_by_authority") === "on" })
-    });
-    toast(`Authority decision recorded: ${result.decision.action.replaceAll("_", " ")}.`, "success");
-    const decisionEmailStatus = result.decision.warning_email_status || result.decision.action_email_status;
-    if (decisionEmailStatus !== "SENT") toast("Citizen email was not sent. Check the server SMTP settings.", "error");
-    state.activeAdminReport = result.report;
-    const index = state.adminReports?.findIndex((item) => item.id === report.id) ?? -1;
-    if (index >= 0) state.adminReports[index] = result.report;
-    renderAdminDetail(result.report);
-    await loadAdminReports();
-  } catch (error) {
-    toast(error.message, "error");
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
 async function reviewFalseReportAppeal(reportId, accept) {
   const note = $("#false-report-review-note")?.value.trim() || "";
   if (note.length < 5) { toast("Add a review note of at least 5 characters.", "error"); return; }
@@ -1476,7 +1499,6 @@ async function reviewFalseReportAppeal(reportId, accept) {
       body: JSON.stringify({ accept, reviewNote: note })
     });
     toast(accept ? "Appeal accepted; the decision was reversed." : "Appeal reviewed and upheld.", "success");
-    if (result.decision.appeal_email_status !== "SENT") toast("Citizen email was not sent. Check the server SMTP settings.", "error");
     state.activeAdminReport = result.report;
     const index = state.adminReports?.findIndex((item) => item.id === reportId) ?? -1;
     if (index >= 0) state.adminReports[index] = result.report;
@@ -1495,9 +1517,9 @@ async function retryFalseReportWarning(reportId) {
     if (index >= 0) state.adminReports[index] = result.report;
     renderAdminDetail(result.report);
     const sent = result.report.false_report_case?.warning_email_status === "SENT" || result.report.false_report_cases?.[0]?.warning_email_status === "SENT";
-    toast(sent ? "Warning email sent." : "Warning email could not be delivered. Check the sender configuration and retry.", sent ? "success" : "error");
+    if (sent) toast("Warning email sent.", "success");
   } catch (error) {
-    toast(error.message, "error");
+    // Email delivery is best effort; keep its transport errors out of the UI.
     if (button) button.disabled = false;
   }
 }
@@ -1552,6 +1574,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateNavForUser();
   showViewFromHash();
   window.addEventListener("hashchange", showViewFromHash);
+  window.setInterval(refreshProfileFalseReportCount, 30000);
 
   // Set default initial auth mode
   setAuthMode("citizen");
@@ -1708,8 +1731,26 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("submit", (event) => {
     if (event.target.id === "modal-update") saveAdminUpdate(event);
     if (event.target.id === "admin-detail-form") saveAdminDetailUpdate(event);
-    if (event.target.id === "false-report-form") submitFalseReportDecision(event);
     if (event.target.matches("[data-false-report-appeal]")) submitCitizenFalseReportAppeal(event);
+  });
+
+  $("#false-report-confirm-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const reason = $("#false-report-confirm-reason").value.trim();
+    const evidenceSummary = $("#false-report-confirm-evidence").value.trim();
+    const confirmedByAuthority = $("#false-report-confirm-check").checked;
+    const errors = { reason: reason.length < 10, evidence: evidenceSummary.length < 10, confirmation: !confirmedByAuthority };
+    Object.entries(errors).forEach(([key, invalid]) => {
+      const node = $(`[data-false-error="${key}"]`);
+      if (node) node.hidden = !invalid;
+    });
+    if (Object.values(errors).some(Boolean)) return;
+    finishFalseReportConfirmation({ reason, evidenceSummary, confirmedByAuthority });
+  });
+  $("#false-report-cancel")?.addEventListener("click", () => finishFalseReportConfirmation(null));
+  $("#false-report-confirm-dialog")?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    finishFalseReportConfirmation(null);
   });
 
   document.addEventListener("keydown", (event) => {

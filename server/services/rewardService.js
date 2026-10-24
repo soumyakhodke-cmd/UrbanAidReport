@@ -203,10 +203,12 @@ export async function awardReportResolution({ report, severity, author }) {
   };
 }
 
-export async function deductFalseReportPoints({ userId, report, requestedPoints }) {
+export async function deductFalseReportPoints({ userId, report, requestedPoints, caseNumber }) {
   const amount = Math.max(0, Number.parseInt(requestedPoints, 10) || 0);
   if (!amount || !userId) return 0;
   if (!config.isSupabaseConfigured) {
+    const alreadyDeducted = mockTransactions.find((transaction) => transaction.report_id === report.id && transaction.transaction_type === "FALSE_REPORT_DEDUCTION");
+    if (alreadyDeducted) return Math.abs(Number(alreadyDeducted.points_awarded) || 0);
     let wallet = mockWallets.get(userId);
     if (!wallet) {
       wallet = { user_id: userId, email: report.reporter_email || "", points_balance: 0, total_points_earned: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
@@ -216,7 +218,7 @@ export async function deductFalseReportPoints({ userId, report, requestedPoints 
     if (deducted > 0) {
       wallet.points_balance -= deducted;
       wallet.updated_at = new Date().toISOString();
-      mockTransactions.unshift({ id: randomUUID(), user_id: userId, reporter_email: report.reporter_email, report_id: report.id, report_ref: report.reference_no, report_title: report.title, report_category: report.category, points_awarded: -deducted, issue_severity: report.severity || report.priority || "LOW", reason: `Point deduction after second confirmed false report: ${report.reference_no}`, transaction_type: "FALSE_REPORT_DEDUCTION", created_at: new Date().toISOString(), acknowledged: true });
+      mockTransactions.unshift({ id: randomUUID(), user_id: userId, reporter_email: report.reporter_email, report_id: report.id, report_ref: report.reference_no, report_title: report.title, report_category: report.category, points_awarded: -deducted, issue_severity: report.severity || report.priority || "LOW", reason: `Point deduction after confirmed false-report case ${caseNumber}: ${report.reference_no}`, case_number: caseNumber, transaction_type: "FALSE_REPORT_DEDUCTION", created_at: new Date().toISOString(), acknowledged: true });
     }
     return deducted;
   }

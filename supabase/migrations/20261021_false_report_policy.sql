@@ -36,6 +36,10 @@ alter table public.false_report_cases add column if not exists warning_email_sta
 alter table public.false_report_cases add column if not exists warning_email_attempted_at timestamptz;
 alter table public.false_report_cases add column if not exists warning_email_provider_id text;
 alter table public.false_report_cases add column if not exists warning_email_error text;
+alter table public.false_report_cases add column if not exists action_email_status text not null default 'NOT_APPLICABLE';
+alter table public.false_report_cases add column if not exists action_email_attempted_at timestamptz;
+alter table public.false_report_cases add column if not exists action_email_provider_id text;
+alter table public.false_report_cases add column if not exists action_email_error text;
 
 create index if not exists false_report_cases_citizen_user_idx on public.false_report_cases(citizen_user_id, case_number desc);
 create index if not exists false_report_cases_email_idx on public.false_report_cases(lower(reporter_email), case_number desc);
@@ -91,14 +95,13 @@ begin
 
   v_email := lower(trim(v_report.reporter_email));
   v_user_id := v_report.user_id;
-  if v_user_id is null then
-    select id into v_user_id from auth.users where lower(email) = v_email and email_confirmed_at is not null order by created_at desc limit 1;
-  end if;
+  -- Only a citizen account linked on the report at authenticated submission
+  -- time is eligible for repeat sanctions. Email similarity is not identity.
   v_identity := coalesce(v_user_id::text, p_report_id::text);
   perform pg_advisory_xact_lock(hashtextextended(v_identity, 0));
 
-  -- Unauthenticated or unverified email submissions may receive a warning,
-  -- but must never accumulate point deductions or monetary penalties.
+  -- Reports without an authenticated account link are isolated case records:
+  -- they do not accumulate repeat sanctions, wallet deductions, or blocks.
   if v_user_id is null then
     v_case_number := 1;
   else
